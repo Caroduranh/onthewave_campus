@@ -120,6 +120,16 @@
     padding:10px 16px;border-radius:12px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:30}
   #toast.show{opacity:1}
   .stat{font-variant-numeric:tabular-nums}
+  .att{display:flex;gap:6px;flex-wrap:wrap}
+  .att button{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:6px 12px;cursor:pointer;font-size:13px;color:var(--muted)}
+  .att button:hover{border-color:#3d4560;color:var(--text)}
+  .att button.on.present{background:var(--ok);border-color:var(--ok);color:#0E111C;font-weight:700}
+  .att button.on.late{background:var(--warn);border-color:var(--warn);color:#0E111C;font-weight:700}
+  .att button.on.absent{background:var(--bad);border-color:var(--bad);color:#0E111C;font-weight:700}
+  .att button.on.excused{background:#93a3c8;border-color:#93a3c8;color:#0E111C;font-weight:700}
+  .date-chip{min-width:58px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:6px 4px;line-height:1.1}
+  .date-chip b{display:block;font-size:20px;font-family:'DM Serif Display',Georgia,serif;font-weight:400}
+  .date-chip span{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
   .code-card .code{font:700 30px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:3px;color:var(--accent);margin-top:4px}
   .code-card .code.off{color:var(--muted);text-decoration:line-through}
   .join{display:flex;gap:8px;margin-top:8px}
@@ -163,6 +173,12 @@ const ytEmbed = id => `<div class="yt"><iframe src="https://www.youtube-nocookie
 const normCode = c => { c = String(c || '').toUpperCase().replace(/\s+/g, ''); return /^[A-Z0-9]{6}$/.test(c) ? 'OTW-' + c : c; };
 const coverUrl = u => esc(encodeURI(String(u || '').trim()).replace(/'/g, '%27'));
 const coverDiv = (u, cls) => u ? `<div class="${cls}" style="background-image:url('${coverUrl(u)}')"></div>` : '';
+const ATT = {present: 'Presente', late: 'Tarde', absent: 'Ausente', excused: 'Excusa'};
+const fmtSession = ts => { const d = new Date(ts), t = d.toLocaleDateString('es', {weekday: 'long', day: 'numeric', month: 'long'}) + ' · ' + d.toLocaleTimeString('es', {hour: 'numeric', minute: '2-digit'}); return t.charAt(0).toUpperCase() + t.slice(1); };
+const dateChip = ts => { const d = new Date(ts); return `<div class="date-chip"><span>${d.toLocaleDateString('es', {month: 'short'})}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString('es', {weekday: 'short'})}</span></div>`; };
+const pad2 = n => String(n).padStart(2, '0');
+const localDate = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+const localTime = d => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 const inviteLink = code => baseUrl() + '?codigo=' + encodeURIComponent(code);
 const baseUrl = () => location.origin + location.pathname;
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
@@ -222,6 +238,14 @@ function supabaseApi(){
     course: id => q(sb.from('courses').select('*').eq('id', id).single()),
     saveAssignment: a => save('assignments', a, ['course_id','week','title','instructions','due_date','published']),
     deleteAssignment: id => q(sb.from('assignments').delete().eq('id', id)),
+    sessions: courseId => q(sb.from('sessions').select('*').eq('course_id', courseId).order('starts_at')),
+    session: id => q(sb.from('sessions').select('*').eq('id', id).single()),
+    saveSession: s => save('sessions', s, ['course_id','starts_at','title','notes']),
+    deleteSession: id => q(sb.from('sessions').delete().eq('id', id)),
+    attendance: sessionIds => q(sb.from('attendance').select('*').in('session_id', sessionIds.length ? sessionIds : ['00000000-0000-0000-0000-000000000000'])),
+    setAttendance: (session_id, email, status) => status
+      ? q(sb.from('attendance').upsert({session_id, email, status, updated_at: new Date().toISOString()}, {onConflict: 'session_id,email'}))
+      : q(sb.from('attendance').delete().eq('session_id', session_id).eq('email', email)),
     messages(f = {}){
       let r = sb.from('journal_messages').select('*').order('created_at');
       if (f.assignment_id) r = r.eq('assignment_id', f.assignment_id);
@@ -281,6 +305,10 @@ function demoApi(){
     {id:'m2', assignment_id:'a1', student_id:'s1', author_id:'t1', body:'¡Vas muy bien Ana! Truco: usa los audífonos solo en un oído y compara los kicks.', created_at:iso(now-1.8*day)},
     {id:'m3', assignment_id:'a1', student_id:'s2', author_id:'s2', body:'Aquí va mi mezcla de la semana. Me costó el pitch fader.', created_at:iso(now-3*3600e3)}
   ];
+  const SS = [
+    {id:'ss1', course_id:'c1', starts_at:iso(now-7*day), title:'Clase 1 · Beatmatching', notes:''},
+    {id:'ss2', course_id:'c1', starts_at:iso(now+1*day), title:'Clase 2 · Transiciones con EQ', notes:''}];
+  const AT = [{session_id:'ss1', email:'ana@ejemplo.com', status:'present'}, {session_id:'ss1', email:'luis@ejemplo.com', status:'late'}];
   let me = P[0], cb = null;
   const wait = v => new Promise(r => setTimeout(() => r(structuredClone(v)), 60));
   const upsert = (arr, obj) => {
@@ -316,6 +344,13 @@ function demoApi(){
     assignment: id => wait(A.find(a => a.id === id && (me.role === 'teacher' || a.published))),
     saveAssignment: a => upsert(A, a),
     deleteAssignment: id => { A.splice(A.findIndex(a => a.id === id), 1); return wait(null); },
+    sessions: cid => wait(SS.filter(x => x.course_id === cid).sort((a, b) => a.starts_at.localeCompare(b.starts_at))),
+    session: id => wait(SS.find(x => x.id === id)),
+    saveSession: x => upsert(SS, x),
+    deleteSession: id => { SS.splice(SS.findIndex(x => x.id === id), 1); return wait(null); },
+    attendance: ids => wait(AT.filter(a => ids.includes(a.session_id) && (me.role === 'teacher' || a.email === me.email))),
+    setAttendance: (session_id, email, status) => { const i = AT.findIndex(a => a.session_id === session_id && a.email === email);
+      if (i >= 0) AT.splice(i, 1); if (status) AT.push({session_id, email, status}); return wait(null); },
     messages: (f = {}) => wait(M.filter(m =>
       (!f.assignment_id || m.assignment_id === f.assignment_id) &&
       (!f.assignment_ids || f.assignment_ids.includes(m.assignment_id)) &&
@@ -368,7 +403,8 @@ async function render(){
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   let html;
   try {
-    if (parts[0] === 'curso' && parts[1])      html = isTeacher() ? await teacherCourse(parts[1], parts[2] || 'tareas') : await studentCourse(parts[1]);
+    if (parts[0] === 'curso' && parts[2] === 'clase' && parts[3] && isTeacher()) html = await attendanceView(parts[1], parts[3]);
+    else if (parts[0] === 'curso' && parts[1])      html = isTeacher() ? await teacherCourse(parts[1], parts[2] || 'tareas') : await studentCourse(parts[1]);
     else if (parts[0] === 'tarea' && parts[3]) html = await threadView(parts[1], parts[3]);
     else if (parts[0] === 'tarea' && parts[1]) html = isTeacher() ? await teacherAssignment(parts[1]) : await threadView(parts[1], S.user.id);
     else if (parts[0] === 'perfil')            html = profileView();
@@ -528,9 +564,34 @@ async function teacherCourse(id, tab){
     <h1 style="display:flex;align-items:center;gap:10px"><span style="width:12px;height:12px;border-radius:50%;background:${esc(course.color)}"></span>${esc(course.title)}</h1>
     <p class="sub">${esc(course.description)} ${course.archived ? '<span class="badge">Archivado</span>' : ''}</p>
     <div class="actions" style="margin-top:0"><button class="btn small" data-act="edit-course">Editar curso</button></div>
-    <nav class="tabs"><a href="#/curso/${id}" class="${tab==='tareas'?'on':''}">Tareas</a><a href="#/curso/${id}/estudiantes" class="${tab==='estudiantes'?'on':''}">Estudiantes (${enrolls.length})</a></nav>`;
+    <nav class="tabs"><a href="#/curso/${id}" class="${tab==='tareas'?'on':''}">Tareas</a><a href="#/curso/${id}/clases" class="${tab==='clases'?'on':''}">Clases y asistencia</a><a href="#/curso/${id}/estudiantes" class="${tab==='estudiantes'?'on':''}">Estudiantes (${enrolls.length})</a></nav>`;
+
+  if (tab === 'clases'){
+    const sessions = await api.sessions(id);
+    PAGE.sessions = sessions;
+    const att = await api.attendance(sessions.map(x => x.id));
+    const bySes = groupBy(att, a => a.session_id);
+    const nowIso = new Date().toISOString();
+    const row = x => { const a = bySes[x.id] || []; const pres = a.filter(r => r.status === 'present' || r.status === 'late').length;
+      const past = x.starts_at <= nowIso;
+      return `<a class="row" href="#/curso/${id}/clase/${x.id}">${dateChip(x.starts_at)}
+        <div class="grow"><b>${esc(x.title || 'Clase')}</b><div class="meta">${esc(fmtSession(x.starts_at))}</div></div>
+        ${a.length ? `<span class="badge ok"><span class="stat">${pres}/${enrolls.length}</span> asistieron</span>` : (past ? '<span class="badge warn">Tomar asistencia</span>' : '<span class="badge">Próxima</span>')}</a>`; };
+    const upcoming = sessions.filter(x => x.starts_at > nowIso), past = sessions.filter(x => x.starts_at <= nowIso).reverse();
+    return head + `<div class="actions" style="margin-top:0"><button class="btn primary" data-act="new-session">+ Nueva clase</button>
+      ${sessions.length ? '<button class="btn" data-act="new-sessions-weekly">+ Varias clases (semanal)</button>' : '<button class="btn" data-act="new-sessions-weekly">+ Crear todas las clases del ciclo</button>'}</div>
+      ${!sessions.length ? '<div class="empty">Agrega las clases del curso (fecha, hora y tema). Después, en cada clase, tomas asistencia con un toque.</div>' : ''}
+      ${upcoming.length ? `<div class="week">Próximas</div><div class="list">${upcoming.map(row).join('')}</div>` : ''}
+      ${past.length ? `<div class="week">Pasadas</div><div class="list">${past.map(row).join('')}</div>` : ''}`;
+  }
 
   if (tab === 'estudiantes'){
+    const sesAll = await api.sessions(id); const nowIso = new Date().toISOString();
+    const pastIds = sesAll.filter(x => x.starts_at <= nowIso).map(x => x.id);
+    const attAll = pastIds.length ? await api.attendance(pastIds) : [];
+    const attBy = groupBy(attAll, a => a.email);
+    const attLabel = em => { if (!pastIds.length) return ''; const r = attBy[em] || []; const n = r.filter(x => x.status === 'present' || x.status === 'late').length;
+      return `<span class="badge" title="Clases a las que asistió">🎧 ${n}/${pastIds.length} clases</span>`; };
     return head + `
     <div class="card code-card"><div class="note">Código de inscripción</div>
       <div class="code ${course.join_enabled ? '' : 'off'}">${esc(course.join_code)}</div>
@@ -548,6 +609,7 @@ async function teacherCourse(id, tab){
     <h2>Inscritos</h2>
     ${enrolls.length ? `<div class="list">${enrolls.map(e => { const p = byEmail[e.email]; return `<div class="row">
       <div class="grow"><b>${esc(p?.full_name || e.email)}</b><div class="meta">${esc(e.email)}</div></div>
+      ${attLabel(e.email)}
       ${p ? '<span class="badge ok">Cuenta activa</span>' : `<span class="badge">Aún sin cuenta</span> <button class="btn small" data-act="invite" data-id="${esc(e.email)}">✉️ Enviar invitación</button>`}
       <button class="btn small danger" data-act="unenroll" data-id="${e.id}">Quitar</button></div>`; }).join('')}</div>`
       : `<div class="empty">Nadie inscrito todavía.</div>`}`;
@@ -567,6 +629,82 @@ async function teacherCourse(id, tab){
         <button class="btn small hide-sm" data-act="edit-assignment" data-id="${a.id}">Editar</button>
         <button class="btn small" data-act="dup-assignment" data-id="${a.id}">Duplicar</button></div>`; }).join('')}</div>`).join('')
     : `<div class="empty">Crea la primera tarea de la semana. Puedes dejarla como borrador y publicarla cuando quieras.</div>`}`;
+}
+
+/* ---------------- PROFE: clase y asistencia ---------------- */
+async function attendanceView(cid, sid){
+  const [course, ses, enrolls, profiles] = await Promise.all([api.course(cid), api.session(sid), api.enrollments(cid), api.profiles()]);
+  if (!ses) throw new Error('Esta clase no existe.');
+  const att = await api.attendance([sid]);
+  PAGE.course = course; PAGE.session = ses;
+  const byEmail = Object.fromEntries(profiles.map(p => [p.email, p]));
+  const st = Object.fromEntries(att.map(a => [a.email, a.status]));
+  const counts = Object.keys(ATT).map(k => `${ATT[k]}: <b class="stat">${att.filter(a => a.status === k).length}</b>`).join(' · ');
+  return `<div class="crumb"><a href="#/">Inicio</a> / <a href="#/curso/${cid}/clases">${esc(course.title)}</a> / Clase</div>
+  <h1>${esc(ses.title || 'Clase')}</h1>
+  <p class="sub">${esc(fmtSession(ses.starts_at))}</p>
+  ${ses.notes ? `<div class="instructions">${fmtText(ses.notes)}</div>` : ''}
+  <div class="actions"><button class="btn small" data-act="edit-session" data-id="${ses.id}">Editar clase</button>
+    ${enrolls.length ? '<button class="btn small" data-act="all-present">Marcar todos presentes</button>' : ''}</div>
+  <h2>Asistencia</h2>
+  <p class="note" id="att-counts">${counts}</p>
+  ${enrolls.length ? `<div class="list">${enrolls.map(e => { const p = byEmail[e.email]; return `<div class="row" style="flex-wrap:wrap">
+    <div class="grow" style="min-width:160px"><b>${esc(p?.full_name || e.email)}</b><div class="meta">${esc(e.email)}</div></div>
+    <div class="att" data-email="${esc(e.email)}">${Object.keys(ATT).map(k => `<button class="${k} ${st[e.email] === k ? 'on' : ''}" data-st="${k}">${ATT[k]}</button>`).join('')}</div></div>`; }).join('')}</div>`
+    : `<div class="empty">No hay estudiantes inscritos en este curso. <a href="#/curso/${cid}/estudiantes">Inscribir</a></div>`}`;
+}
+function bindAttendance(){
+  document.querySelectorAll('.att').forEach(box => box.querySelectorAll('button').forEach(b => b.onclick = async () => {
+    const email = box.dataset.email, was = b.classList.contains('on'), next = was ? null : b.dataset.st;
+    box.querySelectorAll('button').forEach(x => x.classList.remove('on')); if (next) b.classList.add('on');
+    try { await api.setAttendance(PAGE.session.id, email, next); updateAttCounts(); }
+    catch (x) { toast(errMsg(x)); render(); }
+  }));
+}
+function updateAttCounts(){
+  const el = $('#att-counts'); if (!el) return;
+  const on = [...document.querySelectorAll('.att button.on')].map(b => b.dataset.st);
+  el.innerHTML = Object.keys(ATT).map(k => `${ATT[k]}: <b class="stat">${on.filter(x => x === k).length}</b>`).join(' · ');
+}
+
+function sessionForm(x = {}){
+  const n = (PAGE.sessions || []).length + 1;
+  const d = x.starts_at ? new Date(x.starts_at) : (() => { const t = new Date(); t.setMinutes(0, 0, 0); t.setHours(18); return t; })();
+  modal(`<h2>${x.id ? 'Editar clase' : 'Nueva clase'}</h2><form id="sf">
+    <div style="display:grid;grid-template-columns:1fr 130px;gap:12px">
+      <div><label>Fecha</label><input type="date" name="date" required value="${localDate(d)}"></div>
+      <div><label>Hora</label><input type="time" name="time" required value="${localTime(d)}"></div></div>
+    <label>Título o tema</label><input type="text" name="title" value="${esc(x.title ?? 'Clase ' + n)}" placeholder="Clase ${n} · Beatmatching">
+    <label>Notas (opcional)</label><textarea name="notes" style="min-height:80px" placeholder="Qué vamos a ver, qué traer…">${esc(x.notes || '')}</textarea>
+    <div class="actions"><button class="btn primary">Guardar</button><button type="button" class="btn" data-close>Cancelar</button>
+      ${x.id ? '<span class="spacer"></span><button type="button" class="btn danger" id="del-s">Eliminar</button>' : ''}</div></form>`,
+  (m, close) => {
+    m.querySelector('#sf').onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
+      const starts_at = new Date(`${f.get('date')}T${f.get('time')}`).toISOString();
+      const saved = await api.saveSession({id: x.id, course_id: x.course_id || PAGE.course.id, starts_at, title: f.get('title').trim(), notes: f.get('notes')});
+      close(); toast('Clase guardada'); if (!x.id) location.hash = `#/curso/${PAGE.course.id}/clases`; render(); };
+    const del = m.querySelector('#del-s'); if (del) del.onclick = async () => {
+      if (!confirm('¿Eliminar esta clase y su asistencia?')) return;
+      await api.deleteSession(x.id); close(); location.hash = `#/curso/${x.course_id}/clases`; render(); };
+  });
+}
+
+function weeklySessionsForm(){
+  const t = new Date(); t.setMinutes(0, 0, 0); t.setHours(18);
+  const start = (PAGE.sessions || []).length + 1;
+  modal(`<h2>Crear varias clases</h2><p class="note">Crea una clase por semana, el mismo día y a la misma hora. Después puedes editar cualquiera.</p><form id="wf">
+    <div style="display:grid;grid-template-columns:1fr 130px 100px;gap:12px">
+      <div><label>Primera clase</label><input type="date" name="date" required value="${localDate(t)}"></div>
+      <div><label>Hora</label><input type="time" name="time" required value="${localTime(t)}"></div>
+      <div><label>Cuántas</label><input type="number" name="n" min="1" max="52" value="4" required></div></div>
+    <div class="actions"><button class="btn primary">Crear clases</button><button type="button" class="btn" data-close>Cancelar</button></div></form>`,
+  (m, close) => {
+    m.querySelector('#wf').onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
+      const first = new Date(`${f.get('date')}T${f.get('time')}`), n = Math.min(52, +f.get('n'));
+      for (let i = 0; i < n; i++) { const d = new Date(first); d.setDate(first.getDate() + 7 * i);
+        await api.saveSession({course_id: PAGE.course.id, starts_at: d.toISOString(), title: `Clase ${start + i}`, notes: ''}); }
+      close(); toast(`${n} clases creadas`); render(); };
+  });
 }
 
 /* ---------------- PROFE: tarea (lista de estudiantes) ---------------- */
@@ -629,8 +767,13 @@ function isNewFeedback(thread){
   return !seen || seen < last.created_at;
 }
 async function studentCourse(id){
-  const [course, assignments, msgs] = await Promise.all([api.course(id), api.assignments(id), api.messages({student_id: S.user.id})]);
+  const [course, assignments, msgs, sessions] = await Promise.all([api.course(id), api.assignments(id), api.messages({student_id: S.user.id}), api.sessions(id).catch(() => [])]);
   if (!course) throw new Error('No tienes acceso a este curso.');
+  const myAtt = sessions.length ? Object.fromEntries((await api.attendance(sessions.map(x => x.id)).catch(() => [])).map(a => [a.session_id, a.status])) : {};
+  const nowIso = new Date().toISOString();
+  const attBadge = x => myAtt[x.id] ? `<span class="badge ${myAtt[x.id] === 'present' ? 'ok' : myAtt[x.id] === 'absent' ? '' : 'warn'}">${ATT[myAtt[x.id]]}</span>` : (x.starts_at > nowIso ? '<span class="badge">Próxima</span>' : '');
+  const classesHtml = sessions.length ? `<h2>Clases</h2><div class="list">${sessions.map(x => `<div class="row">${dateChip(x.starts_at)}
+    <div class="grow"><b>${esc(x.title || 'Clase')}</b><div class="meta">${esc(fmtSession(x.starts_at))}</div>${x.notes ? `<div class="meta">${fmtText(x.notes)}</div>` : ''}</div>${attBadge(x)}</div>`).join('')}</div>` : '';
   const threads = groupBy(msgs, m => m.assignment_id);
   const weeks = groupBy(assignments, a => a.week);
   const badge = a => { const st = threadStatus(threads[a.id], S.user.id);
@@ -642,7 +785,8 @@ async function studentCourse(id){
   <p class="sub">${esc(course.description)}</p>
   ${assignments.length ? Object.keys(weeks).sort((a, b) => a - b).map(w => `<div class="week">Semana ${w}</div><div class="list">${weeks[w].map(a => `
     <a class="row" href="#/tarea/${a.id}"><div class="grow"><b>${esc(a.title)}</b><div class="meta">${a.due_date ? 'Entrega: ' + fmtDate(a.due_date) : 'Sin fecha límite'}</div></div>${badge(a)}</a>`).join('')}</div>`).join('')
-    : `<div class="empty">Tu profe aún no ha publicado tareas en este curso.</div>`}`;
+    : `<div class="empty">Tu profe aún no ha publicado tareas en este curso.</div>`}
+  ${classesHtml}`;
 }
 
 /* ---------------- HILO DEL JOURNAL (profe y estudiante) ---------------- */
@@ -704,6 +848,7 @@ function bindPage(){
     catch (x) { toast(errMsg(x)); } };
   const lo = $('#logout'); if (lo) lo.onclick = async () => { await api.signOut(); location.hash = '#/'; };
   bindComposer();
+  bindAttendance();
 }
 
 function bindComposer(){
@@ -836,6 +981,13 @@ const actions = {
     el.disabled = true; el.textContent = 'Enviando…';
     try { await api.inviteStudent(email, PAGE.course.title); el.textContent = '✓ Invitación enviada'; toast('Invitación enviada a ' + email); }
     catch (x) { el.disabled = false; el.textContent = '✉️ Enviar invitación'; toast(/rate|seconds/i.test(x.message || '') ? 'Espera un minuto antes de reenviar.' : errMsg(x)); } },
+  'new-session': () => sessionForm({course_id: PAGE.course.id}),
+  'new-sessions-weekly': () => weeklySessionsForm(),
+  'edit-session': () => sessionForm(PAGE.session),
+  'all-present': async () => { const boxes = [...document.querySelectorAll('.att')];
+    for (const box of boxes) { box.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.st === 'present'));
+      await api.setAttendance(PAGE.session.id, box.dataset.email, 'present'); }
+    updateAttCounts(); toast('Todos presentes ✓'); },
   'unenroll': async id => { if (!confirm('¿Quitar a este estudiante del curso? Sus journals se conservan.')) return; await api.removeEnrollment(id); render(); },
   'copy-invite': async () => { const c = PAGE.course;
     const text = `¡Hola! 🎶 Bienvenid@ a ${c.title} de On the Wave.\n\nCrea tu cuenta en nuestro campus aquí:\n${inviteLink(c.join_code)}\n\nTu código de inscripción es: ${c.join_code}\n\nAhí vas a encontrar las tareas de cada semana y tu journal de práctica.`;
