@@ -193,6 +193,14 @@ function supabaseApi(){
     signIn: (email, password) => q(sb.auth.signInWithPassword({email, password})),
     signUp: (email, password, full_name, join_code) => q(sb.auth.signUp({email, password, options:{data:{full_name, join_code}, emailRedirectTo: baseUrl()}})),
     checkJoinCode: code => q(sb.rpc('check_join_code', {p_code: code})),
+    // Invitación: crea la cuenta del estudiante (ya inscrito por email) y le llega un correo de On the Wave
+    async inviteStudent(email, course_title){
+      const inv = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY,
+        {auth: {persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'otw-invite'}});
+      return q(inv.auth.signInWithOtp({email, options: {shouldCreateUser: true, emailRedirectTo: baseUrl(),
+        data: {invited: true, needs_password: true, course_title}}}));
+    },
+    finishInvite: (password, full_name) => q(sb.auth.updateUser({password, data: {needs_password: false, full_name}})),
     joinCourse: code => q(sb.rpc('join_course', {p_code: code})),
     resetPassword: email => q(sb.auth.resetPasswordForEmail(email, {redirectTo: baseUrl()})),
     updatePassword: password => q(sb.auth.updateUser({password})),
@@ -286,6 +294,7 @@ function demoApi(){
     get role(){ return me.role; },
     onAuth(f){ cb = f; setTimeout(() => f('INITIAL_SESSION', {id: me.id, email: me.email}), 0); },
     signIn: async () => {}, signUp: async () => {},
+    inviteStudent: async () => {}, finishInvite: async () => {},
     checkJoinCode: async code => C.some(c => c.join_code === code && c.join_enabled && !c.archived),
     joinCourse: async code => { const c = C.find(c => c.join_code === code && c.join_enabled && !c.archived);
       if (!c) throw new Error('OTW_INVALID_CODE');
@@ -353,6 +362,7 @@ async function render(){
   const app = $('#app');
   if (!S.user) { app.innerHTML = authView(); bindAuth(); return; }
   if (S.recovery) { app.innerHTML = shell(recoveryView()); bindRecovery(); return; }
+  if (S.user.user_metadata?.needs_password) { app.innerHTML = shell(welcomeView()); bindWelcome(); return; }
   if (!S.profile) { app.innerHTML = shell(`<div class="empty">No encontramos tu perfil. Si acabas de configurar la base de datos, cierra sesión y vuelve a registrarte.</div>`); bindShell(); return; }
   app.innerHTML = shell(`<p class="note" style="margin-top:24px">Cargando…</p>`); bindShell();
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
@@ -434,6 +444,26 @@ function bindAuth(){
     btn.disabled = false;
   };
 }
+function welcomeView(){
+  const course = S.user.user_metadata?.course_title;
+  return `<div class="auth" style="margin-top:4vh"><h1>¡Bienvenid@ a On the Wave!</h1>
+    <p class="sub">${course ? `Ya estás inscrit@ en <b>${esc(course)}</b>. ` : ''}Crea tu contraseña para entrar al campus cuando quieras.</p>
+    <form class="card" id="wel-form">
+      <label>Tu nombre completo</label><input type="text" name="n" required autocomplete="name" value="${esc(S.profile?.full_name || '')}">
+      <label>Crea una contraseña</label><input type="password" name="p" minlength="6" required autocomplete="new-password">
+      <div class="actions"><button class="btn primary" style="width:100%">Entrar al campus</button></div><div class="error" id="wel-err"></div></form></div>`;
+}
+function bindWelcome(){
+  $('#wel-form').onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target), n = String(f.get('n')).trim();
+    try {
+      await api.finishInvite(f.get('p'), n);
+      if (S.profile) { await api.updateName(S.user.id, n).catch(() => {}); S.profile.full_name = n; }
+      S.user.user_metadata = {...S.user.user_metadata, needs_password: false};
+      location.hash = '#/'; render();
+    } catch (x) { $('#wel-err').textContent = errMsg(x); }
+  };
+}
 function recoveryView(){
   return `<div class="auth" style="margin-top:4vh"><h1>Nueva contraseña</h1>
     <form class="card" id="rec-form"><label>Escribe tu nueva contraseña</label><input type="password" name="p" minlength="6" required autocomplete="new-password">
@@ -511,14 +541,14 @@ async function teacherCourse(id, tab){
         <button class="btn" data-act="toggle-code">${course.join_enabled ? 'Pausar código' : 'Activar código'}</button>
         <button class="btn" data-act="new-code">Generar código nuevo</button></div></div>
     <details class="card" style="margin-top:12px"><summary style="cursor:pointer"><b>O inscribe por email</b> <span class="note">(no necesitan código)</span></summary>
-      <p class="note" style="margin:8px 0 0">Pega sus emails (uno por línea o separados por coma). Cuando creen su cuenta con ese email, verán el curso.</p>
+      <p class="note" style="margin:8px 0 0">Pega sus emails (uno por línea o separados por coma). Les llega un correo de On the Wave avisándoles que las inscribiste, con un botón para entrar y crear su contraseña.</p>
       <textarea id="emails" placeholder="ana@gmail.com&#10;luis@gmail.com" style="min-height:80px;margin-top:10px"></textarea>
       <div class="actions"><button class="btn primary" data-act="add-emails">Inscribir</button>
         <button class="btn" data-act="copy-link">Copiar link del campus</button></div></details>
     <h2>Inscritos</h2>
     ${enrolls.length ? `<div class="list">${enrolls.map(e => { const p = byEmail[e.email]; return `<div class="row">
       <div class="grow"><b>${esc(p?.full_name || e.email)}</b><div class="meta">${esc(e.email)}</div></div>
-      ${p ? '<span class="badge ok">Cuenta activa</span>' : '<span class="badge">Aún sin cuenta</span>'}
+      ${p ? '<span class="badge ok">Cuenta activa</span>' : `<span class="badge">Aún sin cuenta</span> <button class="btn small" data-act="invite" data-id="${esc(e.email)}">✉️ Enviar invitación</button>`}
       <button class="btn small danger" data-act="unenroll" data-id="${e.id}">Quitar</button></div>`; }).join('')}</div>`
       : `<div class="empty">Nadie inscrito todavía.</div>`}`;
   }
@@ -796,7 +826,16 @@ const actions = {
   'add-emails': async () => {
     const emails = [...new Set($('#emails').value.split(/[\s,;]+/).map(s => s.trim().toLowerCase()).filter(s => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)))];
     if (!emails.length) { toast('No encontré emails válidos.'); return; }
-    await api.addEnrollments(PAGE.course.id, emails); toast(`${emails.length} inscrito${emails.length===1?'':'s'}`); render(); },
+    await api.addEnrollments(PAGE.course.id, emails);
+    const have = new Set((await api.profiles()).map(p => p.email));
+    let sent = 0, fail = 0;
+    for (const em of emails.filter(x => !have.has(x))) { try { await api.inviteStudent(em, PAGE.course.title); sent++; } catch (x) { console.error(x); fail++; } }
+    toast(`${emails.length} inscrito${emails.length===1?'':'s'}` + (sent ? ` · ${sent} invitación${sent===1?'':'es'} enviada${sent===1?'':'s'}` : '') + (fail ? ` · ${fail} no se pudo enviar` : ''));
+    render(); },
+  'invite': async (email, el) => {
+    el.disabled = true; el.textContent = 'Enviando…';
+    try { await api.inviteStudent(email, PAGE.course.title); el.textContent = '✓ Invitación enviada'; toast('Invitación enviada a ' + email); }
+    catch (x) { el.disabled = false; el.textContent = '✉️ Enviar invitación'; toast(/rate|seconds/i.test(x.message || '') ? 'Espera un minuto antes de reenviar.' : errMsg(x)); } },
   'unenroll': async id => { if (!confirm('¿Quitar a este estudiante del curso? Sus journals se conservan.')) return; await api.removeEnrollment(id); render(); },
   'copy-invite': async () => { const c = PAGE.course;
     const text = `¡Hola! 🎶 Bienvenid@ a ${c.title} de On the Wave.\n\nCrea tu cuenta en nuestro campus aquí:\n${inviteLink(c.join_code)}\n\nTu código de inscripción es: ${c.join_code}\n\nAhí vas a encontrar las tareas de cada semana y tu journal de práctica.`;
