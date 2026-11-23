@@ -135,6 +135,34 @@
   .join{display:flex;gap:8px;margin-top:8px}
   .join input{text-transform:uppercase;letter-spacing:2px}
   @media (max-width:600px){ h1{font-size:22px} .msg{max-width:100%} .hide-sm{display:none} }
+  .cal-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .cal-bar b{margin-left:6px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .chip{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:999px;padding:6px 12px;cursor:pointer;font-size:13px;display:inline-flex;align-items:center;gap:6px}
+  .chip.on{border-color:var(--text);font-weight:700}
+  .chip i{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-top:14px}
+  .day{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px;min-height:150px;display:flex;flex-direction:column;gap:6px}
+  .day.today{border-color:var(--accent)}
+  .dh{display:flex;align-items:baseline;gap:6px}
+  .dh span{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .dh b{font-size:18px;font-family:'DM Serif Display',Georgia,serif;font-weight:400}
+  .day.today .dh b{color:var(--accent)}
+  .dh .add{margin-left:auto;border:1px solid var(--line);background:none;color:var(--muted);border-radius:8px;width:24px;height:24px;cursor:pointer;line-height:1}
+  .dh .add:hover{color:var(--text);border-color:var(--muted)}
+  .ev{display:flex;flex-direction:column;gap:1px;background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--muted);border-radius:8px;padding:6px 8px;font-size:12px;color:var(--text)}
+  .ev:hover{border-color:#3d4560}
+  .ev .t{font-variant-numeric:tabular-nums;color:var(--muted)}
+  .ev b{font-size:13px;line-height:1.2}
+  .ev.clash{border-color:var(--bad);box-shadow:0 0 0 1px var(--bad)}
+  .clash-tag{color:var(--bad);font-weight:700}
+  .clash-note{border:1px solid var(--bad);background:rgba(248,113,113,.08);border-radius:10px;padding:10px 12px;margin:12px 0 0;font-size:14px}
+  .clash-note ul,.soft-note ul{margin:6px 0 0 18px;padding:0}
+  .soft-note{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:12px 0 0;font-size:13px;color:var(--muted)}
+  .fgrid{display:grid;grid-template-columns:1fr 110px 120px;gap:12px}
+  @media (max-width:560px){ .fgrid{grid-template-columns:1fr 1fr} .fgrid>:first-child{grid-column:1/-1} .top .cal-link .lbl{display:none} }
+  .top .cal-link{color:var(--text);margin-right:16px;font-size:14px}
+  @media (max-width:760px){ .cal{grid-template-columns:1fr} .day{min-height:0} .day.empty-day{padding:6px 8px} }
 </style>
 </head>
 <body>
@@ -173,6 +201,22 @@ const ytEmbed = id => `<div class="yt"><iframe src="https://www.youtube-nocookie
 const normCode = c => { c = String(c || '').toUpperCase().replace(/\s+/g, ''); return /^[A-Z0-9]{6}$/.test(c) ? 'OTW-' + c : c; };
 const coverUrl = u => esc(encodeURI(String(u || '').trim()).replace(/'/g, '%27'));
 const coverDiv = (u, cls) => u ? `<div class="${cls}" style="background-image:url('${coverUrl(u)}')"></div>` : '';
+const TCOLORS = ['#D6B16A','#22d3ee','#a78bfa','#34d399','#fb923c','#60a5fa'];
+const DUR = x => +x.duration_min || 60;
+const sStart = x => new Date(x.starts_at).getTime();
+const sEnd = x => sStart(x) + DUR(x) * 60000;
+const overlaps = (a, b) => sStart(a) < sEnd(b) && sStart(b) < sEnd(a);
+const sameTeacher = (a, b) => !a.teacher_email || !b.teacher_email || a.teacher_email === b.teacher_email;
+let STAFF = null;
+async function staffList(){
+  if (STAFF) return STAFF;
+  const [rows, profiles] = await Promise.all([api.staff().catch(() => []), api.profiles().catch(() => [])]);
+  const m = new Map((rows || []).map(r => [r.email, r.name]));
+  profiles.filter(p => p.role === 'teacher').forEach(p => { if (!m.has(p.email)) m.set(p.email, p.full_name || p.email); });
+  return STAFF = [...m].map(([email, name]) => ({email, name: name || email.split('@')[0]}));
+}
+const teacherName = e => e ? ((STAFF || []).find(s => s.email === e)?.name || e.split('@')[0]) : 'Sin profe';
+const teacherColor = e => { const i = (STAFF || []).findIndex(s => s.email === e); return i < 0 ? '#6b7280' : TCOLORS[i % TCOLORS.length]; };
 const ATT = {present: 'Presente', late: 'Tarde', absent: 'Ausente', excused: 'Excusa'};
 const fmtSession = ts => { const d = new Date(ts), t = d.toLocaleDateString('es', {weekday: 'long', day: 'numeric', month: 'long'}) + ' · ' + d.toLocaleTimeString('es', {hour: 'numeric', minute: '2-digit'}); return t.charAt(0).toUpperCase() + t.slice(1); };
 const dateChip = ts => { const d = new Date(ts); return `<div class="date-chip"><span>${d.toLocaleDateString('es', {month: 'short'})}</span><b>${d.getDate()}</b><span>${d.toLocaleDateString('es', {weekday: 'short'})}</span></div>`; };
@@ -240,7 +284,9 @@ function supabaseApi(){
     deleteAssignment: id => q(sb.from('assignments').delete().eq('id', id)),
     sessions: courseId => q(sb.from('sessions').select('*').eq('course_id', courseId).order('starts_at')),
     session: id => q(sb.from('sessions').select('*').eq('id', id).single()),
-    saveSession: s => save('sessions', s, ['course_id','starts_at','title','notes']),
+    saveSession: s => save('sessions', s, ['course_id','starts_at','title','notes','duration_min','teacher_email']),
+    allSessions: (from, to) => q(sb.from('sessions').select('*, courses(title,color)').gte('starts_at', from).lt('starts_at', to).order('starts_at')),
+    staff: () => q(sb.rpc('staff_list')),
     deleteSession: id => q(sb.from('sessions').delete().eq('id', id)),
     attendance: sessionIds => q(sb.from('attendance').select('*').in('session_id', sessionIds.length ? sessionIds : ['00000000-0000-0000-0000-000000000000'])),
     setAttendance: (session_id, email, status) => status
@@ -306,8 +352,10 @@ function demoApi(){
     {id:'m3', assignment_id:'a1', student_id:'s2', author_id:'s2', body:'Aquí va mi mezcla de la semana. Me costó el pitch fader.', created_at:iso(now-3*3600e3)}
   ];
   const SS = [
-    {id:'ss1', course_id:'c1', starts_at:iso(now-7*day), title:'Clase 1 · Beatmatching', notes:''},
-    {id:'ss2', course_id:'c1', starts_at:iso(now+1*day), title:'Clase 2 · Transiciones con EQ', notes:''}];
+    {id:'ss1', course_id:'c1', starts_at:iso(now-7*day), title:'Clase 1 · Beatmatching', notes:'', duration_min:120, teacher_email:'info@caroduran.co'},
+    {id:'ss2', course_id:'c1', starts_at:iso(now+1*day), title:'Clase 2 · Transiciones con EQ', notes:'', duration_min:120, teacher_email:'info@caroduran.co'},
+    {id:'ss3', course_id:'c2', starts_at:iso(now+1*day+3600e3), title:'Clase 1 · Session View', notes:'', duration_min:60, teacher_email:'info@caroduran.co'},
+    {id:'ss4', course_id:'c2', starts_at:iso(now+2*day), title:'Clase 2 · Warping', notes:'', duration_min:60, teacher_email:'cindy@ejemplo.com'}];
   const AT = [{session_id:'ss1', email:'ana@ejemplo.com', status:'present'}, {session_id:'ss1', email:'luis@ejemplo.com', status:'late'}];
   let me = P[0], cb = null;
   const wait = v => new Promise(r => setTimeout(() => r(structuredClone(v)), 60));
@@ -347,6 +395,9 @@ function demoApi(){
     sessions: cid => wait(SS.filter(x => x.course_id === cid).sort((a, b) => a.starts_at.localeCompare(b.starts_at))),
     session: id => wait(SS.find(x => x.id === id)),
     saveSession: x => upsert(SS, x),
+    allSessions: (from, to) => wait(SS.filter(x => x.starts_at >= from && x.starts_at < to).sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+      .map(x => { const c = C.find(c => c.id === x.course_id) || {}; return {...x, courses: {title: c.title, color: c.color}}; })),
+    staff: () => wait([{email:'info@caroduran.co', name:'Caro Durán'}, {email:'cindy@ejemplo.com', name:'Cindy Rincón'}]),
     deleteSession: id => { SS.splice(SS.findIndex(x => x.id === id), 1); return wait(null); },
     attendance: ids => wait(AT.filter(a => ids.includes(a.session_id) && (me.role === 'teacher' || a.email === me.email))),
     setAttendance: (session_id, email, status) => { const i = AT.findIndex(a => a.session_id === session_id && a.email === email);
@@ -389,7 +440,7 @@ api.onAuth(async (ev, user) => {
   S.profile = user ? await api.profile(user.id).catch(() => null) : null;
   render();
 });
-window.addEventListener('hashchange', render);
+window.addEventListener('hashchange', () => { const mr = document.getElementById('modal-root'); if (mr) mr.innerHTML = ''; render(); });
 
 let renderSeq = 0;
 async function render(){
@@ -408,6 +459,7 @@ async function render(){
     else if (parts[0] === 'tarea' && parts[3]) html = await threadView(parts[1], parts[3]);
     else if (parts[0] === 'tarea' && parts[1]) html = isTeacher() ? await teacherAssignment(parts[1]) : await threadView(parts[1], S.user.id);
     else if (parts[0] === 'perfil')            html = profileView();
+    else if (parts[0] === 'calendario' && isTeacher()) html = await calendarView(parts[1]);
     else                                       html = isTeacher() ? await teacherHome() : await studentHome();
   } catch (e) {
     console.error(e);
@@ -427,7 +479,7 @@ function shell(inner){
   <header class="top"><div class="wrap">
     <a class="brand" href="#/">${logo()}<span>On the Wave <small>Campus</small></span></a>
     <div class="spacer"></div>
-    <a class="who" href="#/perfil">${esc(name)}${isTeacher() ? ' · profe' : ''}</a>
+    ${isTeacher() ? '<a class="cal-link" href="#/calendario" title="Calendario">📅 <span class="lbl">Calendario</span></a>' : ''}<a class="who" href="#/perfil">${esc(name)}${isTeacher() ? ' · profe' : ''}</a>
   </div></header>
   <main class="wrap">${inner}</main>`;
 }
@@ -567,7 +619,7 @@ async function teacherCourse(id, tab){
     <nav class="tabs"><a href="#/curso/${id}" class="${tab==='tareas'?'on':''}">Tareas</a><a href="#/curso/${id}/clases" class="${tab==='clases'?'on':''}">Clases y asistencia</a><a href="#/curso/${id}/estudiantes" class="${tab==='estudiantes'?'on':''}">Estudiantes (${enrolls.length})</a></nav>`;
 
   if (tab === 'clases'){
-    const sessions = await api.sessions(id);
+    const [sessions] = await Promise.all([api.sessions(id), staffList()]);
     PAGE.sessions = sessions;
     const att = await api.attendance(sessions.map(x => x.id));
     const bySes = groupBy(att, a => a.session_id);
@@ -575,7 +627,7 @@ async function teacherCourse(id, tab){
     const row = x => { const a = bySes[x.id] || []; const pres = a.filter(r => r.status === 'present' || r.status === 'late').length;
       const past = x.starts_at <= nowIso;
       return `<a class="row" href="#/curso/${id}/clase/${x.id}">${dateChip(x.starts_at)}
-        <div class="grow"><b>${esc(x.title || 'Clase')}</b><div class="meta">${esc(fmtSession(x.starts_at))}</div></div>
+        <div class="grow"><b>${esc(x.title || 'Clase')}</b><div class="meta">${esc(fmtSession(x.starts_at))} · ${DUR(x)} min · <span style="color:${teacherColor(x.teacher_email)}">${esc(teacherName(x.teacher_email))}</span></div></div>
         ${a.length ? `<span class="badge ok"><span class="stat">${pres}/${enrolls.length}</span> asistieron</span>` : (past ? '<span class="badge warn">Tomar asistencia</span>' : '<span class="badge">Próxima</span>')}</a>`; };
     const upcoming = sessions.filter(x => x.starts_at > nowIso), past = sessions.filter(x => x.starts_at <= nowIso).reverse();
     return head + `<div class="actions" style="margin-top:0"><button class="btn primary" data-act="new-session">+ Nueva clase</button>
@@ -633,7 +685,7 @@ async function teacherCourse(id, tab){
 
 /* ---------------- PROFE: clase y asistencia ---------------- */
 async function attendanceView(cid, sid){
-  const [course, ses, enrolls, profiles] = await Promise.all([api.course(cid), api.session(sid), api.enrollments(cid), api.profiles()]);
+  const [course, ses, enrolls, profiles] = await Promise.all([api.course(cid), api.session(sid), api.enrollments(cid), api.profiles(), staffList()]);
   if (!ses) throw new Error('Esta clase no existe.');
   const att = await api.attendance([sid]);
   PAGE.course = course; PAGE.session = ses;
@@ -642,7 +694,7 @@ async function attendanceView(cid, sid){
   const counts = Object.keys(ATT).map(k => `${ATT[k]}: <b class="stat">${att.filter(a => a.status === k).length}</b>`).join(' · ');
   return `<div class="crumb"><a href="#/">Inicio</a> / <a href="#/curso/${cid}/clases">${esc(course.title)}</a> / Clase</div>
   <h1>${esc(ses.title || 'Clase')}</h1>
-  <p class="sub">${esc(fmtSession(ses.starts_at))}</p>
+  <p class="sub">${esc(fmtSession(ses.starts_at))} · ${DUR(ses)} min · ${esc(teacherName(ses.teacher_email))}</p>
   ${ses.notes ? `<div class="instructions">${fmtText(ses.notes)}</div>` : ''}
   <div class="actions"><button class="btn small" data-act="edit-session" data-id="${ses.id}">Editar clase</button>
     ${enrolls.length ? '<button class="btn small" data-act="all-present">Marcar todos presentes</button>' : ''}</div>
@@ -667,44 +719,133 @@ function updateAttCounts(){
   el.innerHTML = Object.keys(ATT).map(k => `${ATT[k]}: <b class="stat">${on.filter(x => x === k).length}</b>`).join(' · ');
 }
 
-function sessionForm(x = {}){
+const DURS = [30, 45, 60, 90, 120, 150, 180, 240];
+function durSelect(v = 60){ if (!DURS.includes(+v)) DURS.push(+v);
+  return `<select name="dur">${DURS.sort((a, b) => a - b).map(m => `<option value="${m}"${m === +v ? ' selected' : ''}>${m < 60 ? m + ' min' : (m / 60) + (m === 60 ? ' hora' : ' horas')}</option>`).join('')}</select>`; }
+function teacherSelect(staff, v){
+  return `<select name="teacher">${staff.map(t => `<option value="${esc(t.email)}"${t.email === v ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}<option value=""${!v ? ' selected' : ''}>Sin asignar</option></select>`; }
+async function findClashes(cands){
+  const t0 = Math.min(...cands.map(sStart)) - 864e5, t1 = Math.max(...cands.map(sEnd)) + 864e5;
+  const rows = await api.allSessions(new Date(t0).toISOString(), new Date(t1).toISOString());
+  const hard = [], soft = [];
+  cands.forEach(c => rows.forEach(o => { if (o.id === c.id || !overlaps(c, o)) return; (sameTeacher(c, o) ? hard : soft).push(o); }));
+  const uniq = arr => [...new Map(arr.map(o => [o.id, o])).values()];
+  return {hard: uniq(hard), soft: uniq(soft)};
+}
+function clashHtml({hard, soft}){
+  const li = o => `<li><b>${esc(o.courses?.title || 'Curso')}</b> · ${esc(o.title || 'Clase')} · ${esc(fmtSession(o.starts_at))} (${DUR(o)} min, ${esc(teacherName(o.teacher_email))})</li>`;
+  return (hard.length ? `<div class="clash-note">⚠ <b>Se cruza</b> con ${hard.length === 1 ? 'esta clase' : 'estas clases'} de la misma profe:<ul>${hard.map(li).join('')}</ul></div>` : '')
+    + (soft.length ? `<div class="soft-note">A esa misma hora hay clase con otra profe:<ul>${soft.map(li).join('')}</ul></div>` : '');
+}
+function readSession(f){ return {starts_at: new Date(`${f.get('date')}T${f.get('time')}`).toISOString(), duration_min: +f.get('dur') || 60, teacher_email: f.get('teacher') || null}; }
+
+async function sessionForm(x = {}, opts = {}){
+  const staff = await staffList();
+  const pick = !!opts.pickCourse;
+  const courses = pick ? (await api.courses()).filter(c => !c.archived) : [];
   const n = (PAGE.sessions || []).length + 1;
-  const d = x.starts_at ? new Date(x.starts_at) : (() => { const t = new Date(); t.setMinutes(0, 0, 0); t.setHours(18); return t; })();
+  const d = x.starts_at ? new Date(x.starts_at) : (() => { const t = opts.date ? new Date(opts.date + 'T18:00') : new Date(); if (!opts.date) { t.setMinutes(0, 0, 0); t.setHours(18); } return t; })();
+  const teacher = x.id ? x.teacher_email : (x.teacher_email ?? S.profile.email);
   modal(`<h2>${x.id ? 'Editar clase' : 'Nueva clase'}</h2><form id="sf">
-    <div style="display:grid;grid-template-columns:1fr 130px;gap:12px">
+    ${pick ? `<label>Curso</label><select name="course" required>${courses.map(c => `<option value="${c.id}">${esc(c.title)}</option>`).join('')}</select>` : ''}
+    <div class="fgrid">
       <div><label>Fecha</label><input type="date" name="date" required value="${localDate(d)}"></div>
-      <div><label>Hora</label><input type="time" name="time" required value="${localTime(d)}"></div></div>
-    <label>Título o tema</label><input type="text" name="title" value="${esc(x.title ?? 'Clase ' + n)}" placeholder="Clase ${n} · Beatmatching">
-    <label>Notas (opcional)</label><textarea name="notes" style="min-height:80px" placeholder="Qué vamos a ver, qué traer…">${esc(x.notes || '')}</textarea>
-    <div class="actions"><button class="btn primary">Guardar</button><button type="button" class="btn" data-close>Cancelar</button>
+      <div><label>Hora</label><input type="time" name="time" required value="${localTime(d)}"></div>
+      <div><label>Duración</label>${durSelect(x.duration_min || 60)}</div></div>
+    <label>Profe</label>${teacherSelect(staff, teacher)}
+    <label>Título o tema</label><input type="text" name="title" value="${esc(x.title ?? (pick ? '' : 'Clase ' + n))}" placeholder="${pick ? 'Clase 3 · Beatmatching' : 'Clase ' + n + ' · Beatmatching'}">
+    <label>Notas (opcional)</label><textarea name="notes" style="min-height:70px" placeholder="Qué vamos a ver, qué traer…">${esc(x.notes || '')}</textarea>
+    <div id="sf-warn"></div>
+    <div class="actions"><button class="btn primary" id="sf-save">Guardar</button><button type="button" class="btn" data-close>Cancelar</button>
       ${x.id ? '<span class="spacer"></span><button type="button" class="btn danger" id="del-s">Eliminar</button>' : ''}</div></form>`,
   (m, close) => {
-    m.querySelector('#sf').onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
-      const starts_at = new Date(`${f.get('date')}T${f.get('time')}`).toISOString();
-      const saved = await api.saveSession({id: x.id, course_id: x.course_id || PAGE.course.id, starts_at, title: f.get('title').trim(), notes: f.get('notes')});
-      close(); toast('Clase guardada'); if (!x.id) location.hash = `#/curso/${PAGE.course.id}/clases`; render(); };
+    const form = m.querySelector('#sf'), warn = m.querySelector('#sf-warn'), btn = m.querySelector('#sf-save');
+    let ack = false, timer = 0, last = {hard: [], soft: []};
+    const check = async () => { try { last = await findClashes([{id: x.id, ...readSession(new FormData(form))}]); warn.innerHTML = clashHtml(last); } catch (e) { last = {hard: [], soft: []}; } };
+    form.oninput = form.onchange = e => { if (!['date','time','dur','teacher'].includes(e.target.name)) return; ack = false; btn.textContent = 'Guardar'; clearTimeout(timer); timer = setTimeout(check, 250); };
+    check();
+    form.onsubmit = async e => { e.preventDefault(); const f = new FormData(form); const v = readSession(f);
+      btn.disabled = true;
+      try {
+        await check();
+        if (last.hard.length && !ack) { ack = true; btn.textContent = 'Guardar igual'; btn.disabled = false; warn.scrollIntoView({block: 'nearest'}); return; }
+        const course_id = pick ? f.get('course') : (x.course_id || PAGE.course.id);
+        let title = f.get('title').trim();
+        if (!title && !x.id) title = 'Clase ' + ((await api.sessions(course_id)).length + 1);
+        await api.saveSession({id: x.id, course_id, ...v, title, notes: f.get('notes')});
+        close(); toast('Clase guardada');
+        if (!x.id && !pick) location.hash = `#/curso/${course_id}/clases`;
+        render();
+      } catch (err) { toast(errMsg(err)); btn.disabled = false; }
+    };
     const del = m.querySelector('#del-s'); if (del) del.onclick = async () => {
       if (!confirm('¿Eliminar esta clase y su asistencia?')) return;
       await api.deleteSession(x.id); close(); location.hash = `#/curso/${x.course_id}/clases`; render(); };
   });
 }
 
-function weeklySessionsForm(){
+async function weeklySessionsForm(){
+  const staff = await staffList();
   const t = new Date(); t.setMinutes(0, 0, 0); t.setHours(18);
   const start = (PAGE.sessions || []).length + 1;
   modal(`<h2>Crear varias clases</h2><p class="note">Crea una clase por semana, el mismo día y a la misma hora. Después puedes editar cualquiera.</p><form id="wf">
-    <div style="display:grid;grid-template-columns:1fr 130px 100px;gap:12px">
+    <div class="fgrid">
       <div><label>Primera clase</label><input type="date" name="date" required value="${localDate(t)}"></div>
       <div><label>Hora</label><input type="time" name="time" required value="${localTime(t)}"></div>
       <div><label>Cuántas</label><input type="number" name="n" min="1" max="52" value="4" required></div></div>
-    <div class="actions"><button class="btn primary">Crear clases</button><button type="button" class="btn" data-close>Cancelar</button></div></form>`,
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div><label>Duración</label>${durSelect(60)}</div><div><label>Profe</label>${teacherSelect(staff, S.profile.email)}</div></div>
+    <div id="wf-warn"></div>
+    <div class="actions"><button class="btn primary" id="wf-save">Crear clases</button><button type="button" class="btn" data-close>Cancelar</button></div></form>`,
   (m, close) => {
-    m.querySelector('#wf').onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
-      const first = new Date(`${f.get('date')}T${f.get('time')}`), n = Math.min(52, +f.get('n'));
-      for (let i = 0; i < n; i++) { const d = new Date(first); d.setDate(first.getDate() + 7 * i);
-        await api.saveSession({course_id: PAGE.course.id, starts_at: d.toISOString(), title: `Clase ${start + i}`, notes: ''}); }
-      close(); toast(`${n} clases creadas`); render(); };
+    const form = m.querySelector('#wf'), warn = m.querySelector('#wf-warn'), btn = m.querySelector('#wf-save');
+    let ack = false;
+    const build = f => { const v = readSession(f), first = new Date(v.starts_at), n = Math.max(1, Math.min(52, +f.get('n') || 1));
+      return [...Array(n)].map((_, i) => { const d = new Date(first); d.setDate(first.getDate() + 7 * i); return {...v, starts_at: d.toISOString()}; }); };
+    form.oninput = () => { ack = false; btn.textContent = 'Crear clases'; warn.innerHTML = ''; };
+    form.onsubmit = async e => { e.preventDefault(); const list = build(new FormData(form)); btn.disabled = true;
+      try {
+        const r = await findClashes(list);
+        if (r.hard.length && !ack) { warn.innerHTML = clashHtml(r); ack = true; btn.textContent = 'Crear igual'; btn.disabled = false; return; }
+        for (let i = 0; i < list.length; i++) await api.saveSession({course_id: PAGE.course.id, ...list[i], title: `Clase ${start + i}`, notes: ''});
+        close(); toast(`${list.length} clases creadas`); render();
+      } catch (err) { toast(errMsg(err)); btn.disabled = false; }
+    };
   });
+}
+
+/* ---------------- PROFE: calendario ---------------- */
+function weekStart(d){ const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+async function calendarView(startStr){
+  const start = weekStart(startStr && /^\d{4}-\d\d-\d\d$/.test(startStr) ? new Date(startStr + 'T12:00:00') : new Date());
+  const end = new Date(start); end.setDate(start.getDate() + 7);
+  const [staff, rows] = await Promise.all([staffList(), api.allSessions(new Date(start.getTime() - 864e5).toISOString(), end.toISOString())]);
+  const all = rows.filter(x => sEnd(x) > start.getTime());
+  const clash = new Set();
+  all.forEach(a => all.forEach(b => { if (a.id < b.id && overlaps(a, b) && sameTeacher(a, b)) { clash.add(a.id); clash.add(b.id); } }));
+  const flt = S.calTeacher || '';
+  const shown = all.filter(x => !flt || x.teacher_email === flt);
+  const days = [...Array(7)].map((_, i) => { const d = new Date(start); d.setDate(start.getDate() + i); return d; });
+  const today = localDate(new Date());
+  const shift = k => { const d = new Date(start); d.setDate(start.getDate() + 7 * k); return localDate(d); };
+  const range = `${start.toLocaleDateString('es', {day: 'numeric', month: 'short'})} – ${days[6].toLocaleDateString('es', {day: 'numeric', month: 'short', year: 'numeric'})}`;
+  const block = x => { const tc = teacherColor(x.teacher_email), bad = clash.has(x.id);
+    return `<a class="ev${bad ? ' clash' : ''}" style="border-left-color:${tc}" href="#/curso/${x.course_id}/clase/${x.id}">
+      <span class="t">${localTime(new Date(sStart(x)))}–${localTime(new Date(sEnd(x)))}</span><b>${esc(x.courses?.title || 'Curso')}</b>
+      <span>${esc(x.title || 'Clase')}</span><span style="color:${tc}">${esc(teacherName(x.teacher_email))}</span>${bad ? '<span class="clash-tag">⚠ Se cruza</span>' : ''}</a>`; };
+  const col = d => { const k = localDate(d), ev = shown.filter(x => localDate(new Date(x.starts_at)) === k);
+    return `<div class="day${k === today ? ' today' : ''}${ev.length ? '' : ' empty-day'}"><div class="dh"><span>${esc(d.toLocaleDateString('es', {weekday: 'short'}))}</span><b>${d.getDate()}</b>
+      <button class="add" data-act="cal-add" data-id="${k}" title="Agendar una clase este día">+</button></div>${ev.map(block).join('')}</div>`; };
+  const nClash = all.filter(x => clash.has(x.id) && (!flt || x.teacher_email === flt)).length;
+  return `<div class="crumb"><a href="#/">Inicio</a> / Calendario</div><h1>Calendario de clases</h1>
+  <p class="sub">Todas las clases de todos los cursos. Si dos clases de la misma profe se cruzan, salen en rojo.</p>
+  <div class="cal-bar"><a class="btn small" href="#/calendario/${shift(-1)}" title="Semana anterior">‹</a><a class="btn small" href="#/calendario">Hoy</a>
+    <a class="btn small" href="#/calendario/${shift(1)}" title="Semana siguiente">›</a><b>${esc(range)}</b><span class="spacer"></span>
+    <button class="btn small primary" data-act="cal-add">+ Agendar clase</button></div>
+  <div class="chips"><button class="chip${!flt ? ' on' : ''}" data-act="cal-filter" data-id="">Todas</button>${staff.map(t =>
+    `<button class="chip${flt === t.email ? ' on' : ''}" data-act="cal-filter" data-id="${esc(t.email)}"><i style="background:${teacherColor(t.email)}"></i>${esc(t.name)}</button>`).join('')}</div>
+  ${nClash ? `<div class="clash-note">⚠ Esta semana hay clases que se cruzan. Ábrelas y cambia la hora o la profe.</div>` : ''}
+  <div class="cal">${days.map(col).join('')}</div>`;
 }
 
 /* ---------------- PROFE: tarea (lista de estudiantes) ---------------- */
@@ -984,6 +1125,8 @@ const actions = {
   'new-session': () => sessionForm({course_id: PAGE.course.id}),
   'new-sessions-weekly': () => weeklySessionsForm(),
   'edit-session': () => sessionForm(PAGE.session),
+  'cal-add': date => sessionForm({}, {pickCourse: true, date: date || null}),
+  'cal-filter': email => { S.calTeacher = email || ''; render(); },
   'all-present': async () => { const boxes = [...document.querySelectorAll('.att')];
     for (const box of boxes) { box.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.st === 'present'));
       await api.setAttendance(PAGE.session.id, box.dataset.email, 'present'); }
