@@ -45,6 +45,7 @@ create table if not exists public.courses (
 alter table public.courses add column if not exists join_code    text not null default public.gen_join_code();
 alter table public.courses add column if not exists join_enabled boolean not null default true;
 create unique index if not exists courses_join_code_idx on public.courses (upper(join_code));
+alter table public.courses add column if not exists image_url text not null default '';
 
 -- La inscripción es por email: puedes inscribir a alguien antes de que
 -- cree su cuenta; cuando se registre con ese email, verá su curso.
@@ -189,6 +190,11 @@ create policy profiles_select on public.profiles for select
 drop policy if exists profiles_update on public.profiles;
 create policy profiles_update on public.profiles for update
   using (id = auth.uid()) with check (id = auth.uid());
+-- Permisos de la app (la seguridad fina la dan las políticas RLS de arriba y abajo)
+grant usage on schema public to anon, authenticated;
+grant select on public.profiles to authenticated;
+grant select, insert, update, delete on public.courses, public.enrollments,
+  public.assignments, public.journal_messages to authenticated;
 -- Un estudiante solo puede cambiar su nombre (nunca su rol)
 revoke update on public.profiles from authenticated;
 grant  update (full_name) on public.profiles to authenticated;
@@ -232,6 +238,63 @@ create policy msg_delete_own on public.journal_messages for delete
 drop policy if exists msg_teacher on public.journal_messages;
 create policy msg_teacher on public.journal_messages for all
   using (public.is_teacher()) with check (public.is_teacher() and author_id = auth.uid());
+
+-- ---------- CLASES Y ASISTENCIA ---------------------------------------
+create table if not exists public.sessions (
+  id         uuid primary key default gen_random_uuid(),
+  course_id  uuid not null references public.courses on delete cascade,
+  starts_at  timestamptz not null,
+  title      text not null default '',
+  notes      text not null default '',
+  created_at timestamptz not null default now()
+);
+create index if not exists sessions_course_idx on public.sessions (course_id, starts_at);
+
+create table if not exists public.attendance (
+  session_id uuid not null references public.sessions on delete cascade,
+  email      text not null,
+  status     text not null check (status in ('present','late','absent','excused')),
+  updated_at timestamptz not null default now(),
+  primary key (session_id, email)
+);
+
+alter table public.sessions   enable row level security;
+alter table public.attendance enable row level security;
+grant select, insert, update, delete on public.sessions, public.attendance to authenticated;
+
+drop policy if exists sessions_select on public.sessions;
+create policy sessions_select on public.sessions for select
+  using (public.is_teacher() or public.is_enrolled(course_id));
+drop policy if exists sessions_teacher on public.sessions;
+create policy sessions_teacher on public.sessions for all
+  using (public.is_teacher()) with check (public.is_teacher());
+
+drop policy if exists attendance_select on public.attendance;
+create policy attendance_select on public.attendance for select
+  using (public.is_teacher() or email = lower(auth.jwt()->>'email'));
+drop policy if exists attendance_teacher on public.attendance;
+create policy attendance_teacher on public.attendance for all
+  using (public.is_teacher()) with check (public.is_teacher());
+
+-- ---------- CALENDARIO: duración y profe de cada clase -------------------
+alter table public.sessions add column if not exists duration_min int not null default 60;
+alter table public.sessions add column if not exists teacher_email text;
+update public.sessions set teacher_email = 'info@caroduran.co' where teacher_email is null;
+alter table public.staff add column if not exists name text;
+update public.staff set name = 'Caro Durán'   where email = 'info@caroduran.co';
+update public.staff set name = 'Cindy Rincón' where email = 'cindyrincon10@gmail.com';
+
+-- Lista de profes (solo la pueden pedir profes)
+create or replace function public.staff_list()
+returns table (email text, name text)
+language sql stable security definer set search_path = public as $$
+  select s.email, coalesce(nullif(p.full_name, ''), s.name, split_part(s.email, '@', 1))
+  from public.staff s left join public.profiles p on lower(p.email) = lower(s.email)
+  where public.is_teacher()
+  order by 2;
+$$;
+revoke all on function public.staff_list() from public;
+grant execute on function public.staff_list() to authenticated;
 
 -- ---------- ARCHIVOS DE AUDIO ---------------------------------------
 -- Bucket privado, solo audio. 50 MB por archivo (límite del plan gratis).
