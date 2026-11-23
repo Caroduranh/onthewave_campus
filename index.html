@@ -8,7 +8,7 @@
 <link rel="icon" type="image/png" href="favicon.png?v=2">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root{
     --bg:#0E111C; --panel:#161a28; --panel2:#1e2335; --line:#2a3046;
@@ -25,14 +25,15 @@
   header.top{position:sticky;top:0;z-index:5;background:rgba(14,17,28,.9);backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line)}
   header.top .wrap{display:flex;align-items:center;gap:12px;padding-top:12px;padding-bottom:12px}
-  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:19px;color:var(--text)}
+  .brand{display:flex;align-items:center;gap:10px;font-family:Archivo,Inter,sans-serif;font-weight:800;font-size:18px;text-transform:uppercase;letter-spacing:.4px;color:var(--text)}
   .brand img{height:26px;width:auto;display:block}
-  .serif,h1{font-family:'DM Serif Display',Georgia,serif;font-weight:400;letter-spacing:-.3px}
+  .serif,h1{font-family:Archivo,Inter,sans-serif;font-weight:800;text-transform:uppercase;letter-spacing:-.3px}
+  h2,h3,.course-card h3{font-family:Archivo,Inter,sans-serif;font-weight:700;letter-spacing:-.1px}
   .brand:hover{text-decoration:none}
   .brand small{font-weight:600;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--accent);margin-left:2px}
   .spacer{flex:1}
   .who{color:var(--muted);font-size:14px}
-  h1{font-size:34px;margin:18px 0 4px;line-height:1.1}
+  h1{font-size:32px;margin:18px 0 6px;line-height:1.08}
   h2{font-size:18px;margin:28px 0 10px}
   h3{font-size:15px;margin:0}
   .sub{color:var(--muted);margin:0 0 16px}
@@ -128,7 +129,7 @@
   .att button.on.absent{background:var(--bad);border-color:var(--bad);color:#0E111C;font-weight:700}
   .att button.on.excused{background:#93a3c8;border-color:#93a3c8;color:#0E111C;font-weight:700}
   .date-chip{min-width:58px;text-align:center;border:1px solid var(--line);border-radius:10px;padding:6px 4px;line-height:1.1}
-  .date-chip b{display:block;font-size:20px;font-family:'DM Serif Display',Georgia,serif;font-weight:400}
+  .date-chip b{display:block;font-size:20px;font-family:Archivo,Inter,sans-serif;font-weight:800}
   .date-chip span{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
   .code-card .code{font:700 30px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:3px;color:var(--accent);margin-top:4px}
   .code-card .code.off{color:var(--muted);text-decoration:line-through}
@@ -146,7 +147,7 @@
   .day.today{border-color:var(--accent)}
   .dh{display:flex;align-items:baseline;gap:6px}
   .dh span{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
-  .dh b{font-size:18px;font-family:'DM Serif Display',Georgia,serif;font-weight:400}
+  .dh b{font-size:18px;font-family:Archivo,Inter,sans-serif;font-weight:800}
   .day.today .dh b{color:var(--accent)}
   .dh .add{margin-left:auto;border:1px solid var(--line);background:none;color:var(--muted);border-radius:8px;width:24px;height:24px;cursor:pointer;line-height:1}
   .dh .add:hover{color:var(--text);border-color:var(--muted)}
